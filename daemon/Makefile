@@ -11,6 +11,9 @@ COMPILE = gcc -Wall
 # symbolic targets:
 all: museobuttond
 
+doc:
+	@doxygen doxyfile
+
 museobuttond: museobuttond.o
 	gcc -o museobuttond -lusb -llo museobuttond.o `pkg-config --libs glib-2.0 gthread-2.0 `
 

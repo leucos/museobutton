@@ -952,3 +952,11 @@ main(int argc, char **argv)
 /*! \page page2 Another page
   Even more info.
 */
+
+
+/* Local Variables: */
+/* mode:c           */
+/* comment-column:0 */
+/* compile-command: "make" */
+/* tab-width: 2 */
+/* End:             */
