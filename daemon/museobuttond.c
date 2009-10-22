@@ -109,8 +109,8 @@ debug(int level, const char * template, ...)
   va_start (ap, template);
 
   if (oDaemonize) {
-    vsprintf (buffer, template, ap);
-    syslog(level, buffer);
+    //vsprintf (buffer, template, ap);
+    syslog(level, "%s", buffer);
   } else {
     if (oDebug < level) return;
     vfprintf(stderr, template, ap);
@@ -811,7 +811,7 @@ main(int argc, char **argv)
   if (oDaemonize) {
     daemonize();
   }
-  
+
   if (usbOpenDevice(&handle, oVendor, NULL, oProduct, NULL)) {
     debug(LOG_ERR, "unable to open any device matching VID/PID %d/%d", oVendor, oProduct);
     exit(EXIT_FAILURE);
@@ -833,14 +833,16 @@ main(int argc, char **argv)
       debug(LOG_NOTICE, "echo test failure");
   }
 
-
   openlog("museobuttond", LOG_PID, LOG_LOCAL5);
   debug(LOG_INFO, "opening device %d:%d", oVendor, oProduct);
   debug(LOG_INFO, "sensorID is %d", oSensorId);
-
+  
   /* start OSC server */
   debug(LOG_NOTICE, "starting OSC server");
   
+  fflush(stderr);
+  fflush(stdout);
+
   st = lo_server_thread_new(oOscLocalPort, lo_error);
   sprintf(osc_path,"/erasme/device/led/%d/set", oSensorId);
   lo_server_thread_add_method(st, osc_path, "sfiii", set_led, handle);
