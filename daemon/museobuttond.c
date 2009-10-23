@@ -29,7 +29,8 @@
 #include <syslog.h>
 //#include <pthread.h>
 //#include <glib.h>
-
+#include <fcntl.h> 
+#include <termios.h>
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -51,6 +52,26 @@
 #define VERSION  0.01
 
 #define USBDELAY 20000
+
+#define SERIAL_MODE 0
+#define USB_MODE    1
+
+/** 
+ * @brief Boolean type 
+ *
+ */
+#ifdef TRUE
+#  ifndef boolean_t
+#    define boolean_t int
+#  endif
+#else
+#  ifdef boolean_t
+#    define FALSE 0
+#    define TRUE 1
+#  else
+     typedef enum {FALSE, TRUE} boolean_t;
+#  endif
+#endif
 
 /** 
  * @brief List of available USB commands.
@@ -97,8 +118,9 @@ typedef struct async_queue_config {
   usb_dev_handle *device_handle;
 } async_queue_config_t;
 
-int oDebug = FALSE;
-int oDaemonize = TRUE;
+
+boolean_t oDebug = FALSE;
+boolean_t oDaemonize = TRUE;
 
 static void 
 debug(int level, const char * template, ...)
@@ -164,6 +186,116 @@ daemonize(void)
   freopen("/dev/null", "r", stdin);
   freopen("/dev/null", "w", stdout);
   freopen("/dev/null", "w", stderr);
+}
+
+/**
+ * @brief : Initialize the serial port with some tweaks.
+ *
+ * Open the serial port and set parameters for it.
+ * Mainly, it is set at 8 data bits, no parity, 1 stop bit.
+ * Port is also set RAW, and VMIN is set to 2 since all data
+ * that need to be read has even bytes.
+ *
+ * @param fd 
+ *  The file descriptor to read from
+ * @param baudrate 
+ *  The baudrate to set
+ * @return 
+ *  TRUE if happy, FALSE if something went wrong.
+ * @warning 
+ *  This function should not be used externally
+ */
+
+boolean_t 
+serialInitPort(int fd, int baudrate) 
+{
+
+	// use :   fd = open(port, O_RDWR | O_NOCTTY);
+
+	struct termios options;
+
+  debug(LOG_DEBUG,"Setting port attributes");
+
+	/* Get the current options for the port */
+	tcgetattr(fd, &options);
+
+	/* Set the baud rates to BAUDRATE */
+  if (cfsetispeed(&options, baudrate) == -1)
+    debug(LOG_WARNING,"cfsetispeed error ");
+
+	if (cfsetospeed(&options, baudrate))
+    debug(LOG_WARNING,"cfsetospeed error ");
+
+  /* 8N1 */
+  options.c_cflag &= ~PARENB;
+  options.c_cflag &= ~CSTOPB;
+  options.c_cflag &= ~CSIZE;
+  options.c_cflag |= CS8;
+
+  /* No hardware flow control */
+  options.c_cflag &= ~CRTSCTS;
+  
+  /* Turn on READ & ignore ctrl lines */
+  options.c_cflag |= CREAD | CLOCAL;  
+
+  /* No software flow control */
+  options.c_iflag &= ~(IXON | IXOFF | IXANY);
+  
+  /* Make raw */
+  options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+  options.c_oflag &= ~OPOST;
+  
+  /* read() will block until there's 26 bytes of data available
+   * see: http://unixwiz.net/techtips/termios-vmin-vtime.html */
+  options.c_cc[VMIN]   = 2; 
+  options.c_cc[VTIME]  = 0; 
+  
+	/* Apply the new options for the port */
+	tcsetattr(fd, TCSANOW, &options);
+
+  return TRUE;
+}
+
+/**
+ * @brief : Serial device lookup and opening
+ *
+ * opens device given in parameters. If device is NULL, 
+ * this function will try to autodetect the port (NOT UMPLEMENTED).
+ *
+ * @param[out] fd The file descriptor to read to/write from is open is successful.
+ * @param[in] port The serial rort device to use (e.g. "/dev/ttyUSB1")
+ * @param[in] baudrate The communication baud rate (only 9600, 19200 and 57600 are supported)
+ *
+ * @return 0 on failure, a real fd number otherwise.
+ *
+ */
+
+int 
+serialOpen(char *port, int baudrate) {
+  int fd = open(port, O_RDWR | O_NOCTTY);
+
+  if (fd == -1) {
+		debug(LOG_ERR,"SERIAL error: port %s opening failed", port);
+    exit(1);
+  } 
+
+  debug(LOG_INFO,"Port %s opened successfuly", port);
+
+  /* Set port attributes (baudrate only) */
+  if (baudrate == 57600)
+    serialInitPort(fd, B57600);
+  else if (baudrate==19200) 
+    serialInitPort(fd, B19200);
+  else if (baudrate==9600)
+    serialInitPort(fd, B9600); 
+  else {
+		debug(LOG_ERR,"SERIAL error: unsupported baud rate (only 9600, 19200 and 57600 are supported)");
+    exit(1);
+  }
+
+  debug(LOG_INFO,"Baudrate set successfuly to %d", baudrate);
+
+	return fd;
 }
 
 static int 
@@ -288,13 +420,16 @@ usage()
   fprintf(stderr, "\t-h : this help\n");
   fprintf(stderr, "\t-t : run initial USB tests (default : no)\n");
   fprintf(stderr, "\t-f : run foreground, do not daemonize (default : no)\n");
-  fprintf(stderr, "\t-g : debug (default : no)\n");
+  fprintf(stderr, "\t-g <0-7> : debug level (default : no debug, see sys/syslog.h for levels)\n");
+  fprintf(stderr, "\t-u : USB mode (default : serial mode)\n");
+  fprintf(stderr, "\t-P <port> : serial port (default : none\n");
+  fprintf(stderr, "\t-b <rate> : serial baud rate (default : 9600; use 9600, 19200 or 57600)\n");
   fprintf(stderr, "\t-v <id> : USB vendor ID (default : USBDEV_DEFAULT_SHARED_VENDOR\n");
   fprintf(stderr, "\t-p <id> : USB product ID (default : USBDEV_DEFAULT_SHARED_PRODUCT\n");
   fprintf(stderr, "\t-l <port> : local OSC port (default 1234)\n");
-  fprintf(stderr, "\t-r <port> : remote OSC port (default 1234)\n");
+  fprintf(stderr, "\t-r <port> : remote OSC port (default 1235)\n");
   /** @todo : make broadcasting the default behaviour */
-  fprintf(stderr, "\t-d <ip> : remote OSC machine (default : none)\n");
+  fprintf(stderr, "\t-d <ip> : remote OSC machine (default 127.0.0.1)\n");
   fprintf(stderr, "\t-s <id> : local sensor ID (default : none)\n");
   fprintf(stderr, "\t[id0] ... : list of IDs to open (default : first found)\n");
 
@@ -312,8 +447,8 @@ usage()
  *
  * @return TRUE on success, FALSE on failure
  */ 
-int 
-runtest(usb_dev_handle *handle) 
+boolean_t 
+usbRunTest(usb_dev_handle *handle) 
 {
   int v, r, i, nBytes;
   unsigned char buffer[8];
@@ -344,7 +479,7 @@ runtest(usb_dev_handle *handle)
 }
 
 
-void usb_error(usb_dev_handle* handle, const char* caller) {
+void usbError(usb_dev_handle* handle, const char* caller) {
 
   debug(LOG_ERR, "fatal USB error in %s", caller);
   sleep(1);
@@ -375,18 +510,18 @@ void usb_error(usb_dev_handle* handle, const char* caller) {
  */
 
 void 
-lo_error(int num, const char *msg, const char *path)
+loError(int num, const char *msg, const char *path)
 {
   debug(LOG_ERR, "liblo server error %d in path %s: %s", num, path, msg);
 }
 
 
 void *
-usb_talker(usb_dev_handle* handle, usb_message_t* message) {
+usbTalker(usb_dev_handle* handle, usb_message_t* message) {
   char buffer[8];
   int nBytes;
 
-  debug(LOG_NOTICE, "usb_talker : cmd %.2x, data %d (%.2x)", message->cmd, (uint8_t)message->data[0], (uint8_t)message->data[0]);
+  debug(LOG_NOTICE, "usbTalker : cmd %.2x, data %d (%.2x)", message->cmd, (uint8_t)message->data[0], (uint8_t)message->data[0]);
 
   switch (message->cmd) {
   case USB_ECHO:
@@ -407,12 +542,12 @@ usb_talker(usb_dev_handle* handle, usb_message_t* message) {
 
     if(nBytes < 0) {
       debug(LOG_WARNING, "error in USB control transfer: %s\n", usb_strerror());
-      usb_error(handle, "usb_talker");
+      usbError(handle, "usbTalker");
       g_free(message);
       message = NULL;
     }
     if(nBytes != message->len){
-      debug(LOG_WARNING, "data format error in usb_talker : only %d bytes received (%d expected)\n", nBytes, message->len);
+      debug(LOG_WARNING, "data format error in usbTalker : only %d bytes received (%d expected)\n", nBytes, message->len);
       g_free(message);
       message = NULL;
     } else {
@@ -460,7 +595,7 @@ usb_talker(usb_dev_handle* handle, usb_message_t* message) {
  * @param argv Data received via OSC, containing the 3 color values
  */
 int 
-set_led(const char *path, const char *types, lo_arg **argv, int argc,
+usbSetLed(const char *path, const char *types, lo_arg **argv, int argc,
         void *data, void *user_data) 
 {
   debug(LOG_NOTICE,"got OSC message");
@@ -493,7 +628,7 @@ set_led(const char *path, const char *types, lo_arg **argv, int argc,
   else if (!strcmp("triangle",  wave))
     message->data[0] = PULSEMODE_TRIANGLE;
   debug(LOG_DEBUG, "pushing red waveform to queue");
-  usb_talker(handle,message);
+  usbTalker(handle,message);
  /*
     usb_control_msg((usb_dev_handle*)user_data, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, 
                     USB_SET_WAVEFORM, PULSEMODE_SIN, 0, (char *)buffer, sizeof(buffer), 5000);
@@ -508,7 +643,7 @@ set_led(const char *path, const char *types, lo_arg **argv, int argc,
   message->cmd = USB_SET_RED;
   message->data[0] = red;
   debug(LOG_DEBUG, "pushing RED value to queue");
-  usb_talker(handle,message);
+  usbTalker(handle,message);
 
   /*
   usb_control_msg((usb_dev_handle*)user_data, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, 
@@ -520,7 +655,7 @@ set_led(const char *path, const char *types, lo_arg **argv, int argc,
   message->cmd = USB_SET_GREEN;
   message->data[0] = green;
   debug(LOG_DEBUG, "pushing GREEN value to queue");
-  usb_talker(handle,message);
+  usbTalker(handle,message);
 
 
 
@@ -534,7 +669,7 @@ set_led(const char *path, const char *types, lo_arg **argv, int argc,
   message->cmd = USB_SET_BLUE;
   message->data[0] = blue;
   debug(LOG_DEBUG, "pushing BLUE value to queue");
-  usb_talker(handle,message);
+  usbTalker(handle,message);
 
 
 
@@ -549,7 +684,7 @@ set_led(const char *path, const char *types, lo_arg **argv, int argc,
   message->cmd = USB_SET_PERIOD;
   message->data[0] = period_in_tenths;
   debug(LOG_DEBUG, "pushing BLUE value to queue");
-  usb_talker(handle,message);
+  usbTalker(handle,message);
 
 
   /*  usb_control_msg((usb_dev_handle*)user_data, USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_ENDPOINT_OUT, 
@@ -563,7 +698,7 @@ set_led(const char *path, const char *types, lo_arg **argv, int argc,
  * @param handle USB handle
  * @returns the button state (0|1) and -1 if error
  **/
-int get_button(usb_dev_handle* handle) 
+int usbGetButton(usb_dev_handle* handle) 
 {
   char buffer[8];
 
@@ -577,7 +712,7 @@ int get_button(usb_dev_handle* handle)
 
   if(nBytes < 0) {
     debug(LOG_WARNING, "error in USB control transfer: %s\n", usb_strerror());
-    usb_error(handle, "get_button");
+    usbError(handle, "get_button");
   }
   if(nBytes == 0) // no more data 
     return -127;
@@ -588,7 +723,7 @@ int get_button(usb_dev_handle* handle)
     return buffer[0];
 }
 
-int get_temperature(usb_dev_handle* handle)
+int usbGetTemperature(usb_dev_handle* handle)
 {
   unsigned char buffer[8];
 
@@ -602,7 +737,7 @@ int get_temperature(usb_dev_handle* handle)
 
   if(nBytes < 0) {
     debug(LOG_WARNING, "error in USB control transfer: %s\n", usb_strerror());
-    usb_error(handle, "get_temperature");
+    usbError(handle, "get_temperature");
   }
   if(nBytes == 0) // no more data 
     return -127;
@@ -619,7 +754,7 @@ int get_temperature(usb_dev_handle* handle)
  * OSC functions
  */
 
-int create_udp_server(int port)
+int udpCreateServer(int port)
 {
   int socket_id;
   struct sockaddr_in sockname;
@@ -649,7 +784,7 @@ int create_udp_server(int port)
   return(socket_id);
 }
 
-void read_osc_message(int socket_id, usb_dev_handle* handle)
+void oscReadMessage(int socket_id, usb_dev_handle* handle)
 {
   socklen_t sockaddr_in_len = sizeof(struct sockaddr_in);
   struct sockaddr_in sockname;
@@ -725,95 +860,35 @@ void read_osc_message(int socket_id, usb_dev_handle* handle)
   //  set_led(red, green, blue, freq, form, handle);
 }
 
+/**
+ * @brief This never ending loop is called in USB mode
+ *
+ */
+void 
+serialLoop(const char *serialPort, int baudRate, const char *localPort, const char *destination, const char *remotePort) {
+	int fd;
+
+	fd = serialOpen((char *)serialPort, baudRate);
+}
 
 /**
- * @brief Well, this is main...
+ * @brief This never ending loop is called in USB mode
  *
- * Just orchestrating stuff : daemonization, OSC callback set-up, etc...
- *
- * @return Hopefuly not
  */
-int 
-main(int argc, char **argv)
-{
+void 
+usbLoop(int vendor, int product, boolean_t runTest, int sensorId, const char *localPort, const char *destination, const char *remotePort) {
+
+  usb_dev_handle    * handle = NULL;
   char                osc_path[256];
-  char                c;
-  lo_server_thread    st;
-  lo_address          osc_dest;
   int                 button_last_state = 0;
   int                 button_current_state = 0;
-  int                 temperature = 0;
 
-  usb_dev_handle      *handle = NULL;
+  lo_address          osc_dest;
+  lo_server_thread    st;
 
-  /* Options */
-  char *              oOscLocalPort = NULL;
-  char *              oOscRemotePort = NULL;
-  char *              oOscDestination = NULL;
-
-  int                 oVendor = USBDEV_DEFAULT_SHARED_VENDOR;
-  int                 oProduct = USBDEV_DEFAULT_SHARED_PRODUCT;
-
-  int                 oRunTest = FALSE;
-  int                 oSensorId;
-
-
-  /* OSC */
-  
-  int socket_id;
-
-  /* thread stuff */
-  while ((c = getopt(argc, argv, "htfv:p:s:l:r:d:g:")) != -1 ) {
-    switch (c) {
-    case 's':
-      oSensorId = atoi(optarg);
-      debug(LOG_INFO, "options : sensorID is %d", oSensorId);
-      break;
-    case 'v':
-      oVendor = atoi(optarg);
-      break;
-    case 'p':
-      oProduct = atoi(optarg);;
-      break;
-    case 't':
-      oRunTest = TRUE;
-      break;
-    case 'f':
-      oDaemonize = FALSE;
-      break;
-    case 'l': /* ## free needed */
-      oOscLocalPort = g_malloc(strlen(optarg));
-      strcpy(oOscLocalPort,optarg);
-      break;
-    case 'r': /* ## free needed */
-      oOscRemotePort = g_malloc(strlen(optarg));
-      strcpy(oOscRemotePort,optarg);
-      break;
-    case 'd': /* ## free needed */
-      oOscDestination = g_malloc(strlen(optarg));
-      strcpy(oOscDestination,optarg);
-      break;
-    case 'g':
-      oDebug = atoi(optarg);
-      break;
-    case '?':
-      if (isprint (optopt))
-          fprintf (stderr, "Unknown option `-%c'.\n", optopt);
-      else
-        fprintf (stderr, "Unknown option character `\\x%x'.\n", optopt);
-    case 'h':
-    default:
-      usage();
-      exit(EXIT_FAILURE);
-    }
-  }
-
-  if (oDaemonize) {
-    daemonize();
-  }
-
-  if (usbOpenDevice(&handle, oVendor, NULL, oProduct, NULL)) {
-    debug(LOG_ERR, "unable to open any device matching VID/PID %d/%d", oVendor, oProduct);
+  debug(LOG_INFO, "opening device %d:%d", vendor, product);
+  if (usbOpenDevice(&handle, vendor, NULL, product, NULL)) {
+    debug(LOG_ERR, "unable to open any device matching VID/PID %d/%d", vendor, product);
     exit(EXIT_FAILURE);
   }
 
@@ -826,34 +901,29 @@ main(int argc, char **argv)
     debug(LOG_ERR, "error setting USB interface: %s", usb_strerror());
   }
   */
-  if(oRunTest){
-    if (runtest(handle))
+  if(runTest){
+    if (usbRunTest(handle))
       debug(LOG_NOTICE, "echo test successded");
     else
       debug(LOG_NOTICE, "echo test failure");
   }
 
-  openlog("museobuttond", LOG_PID, LOG_LOCAL5);
-  debug(LOG_INFO, "opening device %d:%d", oVendor, oProduct);
-  debug(LOG_INFO, "sensorID is %d", oSensorId);
-  
   /* start OSC server */
   debug(LOG_NOTICE, "starting OSC server");
   
   fflush(stderr);
   fflush(stdout);
 
-  st = lo_server_thread_new(oOscLocalPort, lo_error);
-  sprintf(osc_path,"/erasme/device/led/%d/set", oSensorId);
-  lo_server_thread_add_method(st, osc_path, "sfiii", set_led, handle);
+  st = lo_server_thread_new(localPort, loError);
+  sprintf(osc_path,"/erasme/device/led/%d/set", sensorId);
+  lo_server_thread_add_method(st, osc_path, "sfiii", usbSetLed, handle);
   lo_server_thread_start(st);
   
-
-  /* OSC destination */
-  osc_dest = lo_address_new(oOscDestination, oOscRemotePort);
-
   //  socket_id = create_udp_server(atoi(oOscLocalPort));
   debug(LOG_NOTICE, "OSC server started");
+
+  /* OSC destination */
+  osc_dest = lo_address_new(destination, remotePort);
 
   for (;;) {
     for(;;) {   
@@ -862,21 +932,21 @@ main(int argc, char **argv)
 
       usleep(USBDELAY);
 
-      button_current_state = get_button(handle);
+      button_current_state = usbGetButton(handle);
 
       if (button_last_state != button_current_state) {
         button_last_state = button_current_state;
         debug(LOG_NOTICE, "button is now %s", (button_current_state ? "on" : "off"));
 
         if (button_current_state) {
-          debug(LOG_NOTICE, "button press for %d", oSensorId);
-          sprintf(osc_path,"/erasme/sensor/keyboard/%d/press", oSensorId);
+          debug(LOG_NOTICE, "button press for %d", sensorId);
+          sprintf(osc_path,"/erasme/sensor/keyboard/%d/press", sensorId);
           debug(LOG_NOTICE, "sending OSC notification %s", osc_path);
           if (lo_send(osc_dest, osc_path, "i", 0) == -1) {
             debug(LOG_WARNING, "OSC error %d: %s\n", lo_address_errno(osc_dest), lo_address_errstr(osc_dest));
           }
         } else {
-          sprintf(osc_path,"/erasme/sensor/keyboard/%d/release", oSensorId);
+          sprintf(osc_path,"/erasme/sensor/keyboard/%d/release", sensorId);
           debug(LOG_NOTICE, "sending OSC notification %s", osc_path);
           if (lo_send(osc_dest, osc_path, "i", 0) == -1) {
             debug(LOG_WARNING, "OSC error %d: %s\n", lo_address_errno(osc_dest), lo_address_errstr(osc_dest));
@@ -907,9 +977,126 @@ main(int argc, char **argv)
       }*/
     
   }
-
-  return 0;
 }
+
+/**
+ * @brief Well, this is main...
+ *
+ * Just orchestrating stuff : daemonization, OSC callback set-up, etc...
+ *
+ * @return Hopefuly not
+ */
+int 
+main(int argc, char **argv)
+{
+  char                c;
+
+  int                 button_last_state = 0;
+  int                 button_current_state = 0;
+  int                 temperature = 0;
+
+  char                osc_path[256];
+
+  /* Options */
+	int                 oVendor  = USBDEV_DEFAULT_SHARED_VENDOR;
+	int                 oProduct = USBDEV_DEFAULT_SHARED_PRODUCT;
+
+  char *              oOscLocalPort = NULL;
+  char *              oOscRemotePort = NULL;
+  char *              oOscDestination = NULL;
+
+  char *              oSerialPort = NULL;
+  int                 oSerialBaudRate = 9600;
+
+  boolean_t           oRunTest = FALSE;
+  int                 oSensorId = 0;
+
+	int                 oRunMode = SERIAL_MODE;
+
+  /* OSC */
+  
+  int socket_id;
+
+  /* thread stuff */
+  while ((c = getopt(argc, argv, "htfv:p:s:l:r:d:g:uP:b:")) != -1 ) {
+    switch (c) {
+    case 's':
+      oSensorId = atoi(optarg);
+      debug(LOG_INFO, "options : sensorID is %d", oSensorId);
+      break;
+    case 'v':
+      oVendor = atoi(optarg);
+      break;
+    case 'p':
+      oProduct = atoi(optarg);;
+      break;
+    case 't':
+      oRunTest = TRUE;
+      break;
+    case 'f':
+      oDaemonize = FALSE;
+      break;
+    case 'l': /* ## free needed */
+			// ##TODO : use advertized default
+      oOscLocalPort = g_malloc(strlen(optarg));
+      strcpy(oOscLocalPort,optarg);
+      break;
+    case 'r': /* ## free needed */
+			// ##TODO : use advertized default
+      oOscRemotePort = g_malloc(strlen(optarg));
+      strcpy(oOscRemotePort,optarg);
+      break;
+    case 'd': /* ## free needed */
+			// ##TODO : use advertized default
+      oOscDestination = g_malloc(strlen(optarg));
+      strcpy(oOscDestination,optarg);
+      break;
+    case 'g':
+      oDebug = atoi(optarg);
+      break;
+    case 'P': /* ## free needed */
+			// ##TODO : use advertized default
+      oSerialPort = g_malloc(strlen(optarg));
+      strcpy(oSerialPort,optarg);
+      break;
+    case 'b':
+      oSerialBaudRate = atoi(optarg);
+      break;
+		case 'u':
+			oRunMode = USB_MODE;
+    case '?':
+      if (isprint (optopt))
+          fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+      else
+        fprintf (stderr, "Unknown option character `\\x%x'.\n", optopt);
+    case 'h':
+    default:
+      usage();
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  if (oDaemonize) {
+    daemonize();
+  }
+
+
+  openlog("museobuttond", LOG_PID, LOG_LOCAL5);
+
+  debug(LOG_INFO, "sensorID is %d", oSensorId);
+  
+
+	if (oRunMode == USB_MODE) {
+		debug(LOG_INFO, "entering USB mode");
+		usbLoop(oVendor, oProduct, oRunTest, oSensorId, oOscLocalPort, oOscDestination, oOscRemotePort);
+	} else {
+		debug(LOG_INFO, "entering SERIAL mode");
+		serialLoop(oSerialPort, oSerialBaudRate, oOscLocalPort, oOscDestination, oOscRemotePort);
+	}
+
+	return 0;
+}
+
 
 /* -------------------*/
 /* Some documentation */
