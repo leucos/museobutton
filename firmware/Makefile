@@ -17,13 +17,16 @@ COMPILE = avr-gcc -Wall -Os -Iusbdrv -I. -mmcu=$(DEVICE) #-DDEBUG_LEVEL=2
 # distort timing so that the specs can't be met.
 
 OBJECTS_I2C = TWI_Master.o
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o main.o 
+OBJECTS = main.o 
+
+ifdef USB
+COMPILE := $(COMPILE) -DUSB
+OBJECTS := $(OBJECTS) usbdrv/usbdrv.o usbdrv/usbdrvasm.o
+endif
 
 ifdef I2C
 COMPILE := $(COMPILE) -DI2C
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o main.o TWI_Master.o
-else
-OBJECTS = usbdrv/usbdrv.o usbdrv/usbdrvasm.o main.o 
+OBJECTS := $(OBJECTS) TWI_Master.o
 endif
 
 ifdef USE_TRIANGLE

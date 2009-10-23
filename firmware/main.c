@@ -69,6 +69,8 @@
 
 #define F_CPU 12000000
 #define PRESCALER 256
+#define USART_BAUDRATE 9600
+#define BAUD_PRESCALE (((F_CPU / (USART_BAUDRATE * 16UL))) - 1)
 
 #define ISR_PER_SEC   ((F_CPU/PRESCALER)/256)
 #define ISR_PER_TENTH (ISR_PER_SEC/10)
@@ -95,6 +97,7 @@
 #define GREEN OCR1BL
 #define BLUE  OCR2
 
+#ifdef USB
 /** 
  * @brief List of available USB commands.
  * 
@@ -116,6 +119,7 @@ enum USB_COMMANDS {
   USB_GET_BUTTON,        /**< gets button state          */
   USB_GET_TEMP,          /**< gets temperature           */
 };
+#endif
 
 /** 
  * @brief List of available waveforms
@@ -169,6 +173,14 @@ volatile uint8_t *port[3] = { &RED, &GREEN, &BLUE };
  * It is here to compensate for color differences
  */
 volatile uint8_t maxcolor[4];
+
+/**
+ * @brief Last seen temperature
+ *
+ * This variable contains the last seen temperature from the sensor
+ */
+uint8_t serial_buf_index = 0;
+char serial_buffer[16];
 
 /**
  * @brief Last seen temperature
@@ -459,6 +471,8 @@ reset_qt() {
    PORTD |= _BV(PD7); 
 }
 
+#ifdef USB
+
 void
 reset_usb() {
   DDRD = ~0;          /* output SE0 for faked USB disconnect */
@@ -466,6 +480,26 @@ reset_usb() {
   DDRD = ~(USBMASK | _BV(PD6));    /* all outputs except USB data */
   //pins_init();
 }
+
+#else
+static inline void usart_init(void)
+{
+  /* Enable in/out channels */
+  UCSRB |= (1 << RXEN) | (1 << TXEN);
+
+  /* Use 8-bit character sizes - URSEL bit set 
+   * to select the UCRSC register */
+  UCSRC |= (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1); 
+
+  /* Load lower 8-bits of the baud rate value 
+   * into the low byte of the UBRR register */
+  UBRRL = BAUD_PRESCALE; 
+
+  /* Load upper 8-bits of the baud rate value 
+   * into the high byte of the UBRR register */
+  UBRRH = (BAUD_PRESCALE >> 8);
+}
+#endif
 
 void
 pwm_init() {
@@ -513,6 +547,8 @@ pwm_init() {
  * @}
  * <!-- End of initfunctions -->
  */
+
+#ifdef USB
 
 USB_PUBLIC uchar usbFunctionSetup(uchar data[8])
 {
@@ -587,6 +623,71 @@ USB_PUBLIC uchar usbFunctionSetup(uchar data[8])
   }
   return 0;
 }
+#else
+
+static inline void send_char(uint8_t byte)
+{
+  /* Wait until output buffer is empty */
+  while ((UCSRA & (1 << UDRE)) == 0) {};
+
+  /* Send out the byte value in the variable "ByteToSend" */
+  UDR = byte;
+}
+
+static inline void serial_print(const char *txt) 
+{
+  while(*txt) {
+    send_char(*txt++);
+  }   
+}
+
+static inline int get_byte()
+{
+	if (UCSRA & (1<<RXC)) {
+		serial_buffer[serial_buf_index] = UDR;
+		serial_buf_index++;
+		return TRUE;
+	}
+	return FALSE;
+}
+// 04 01 ff 00 00
+static inline void serial_poll()
+{
+	get_byte();
+
+	/* Abnormal condition */
+	if (serial_buf_index > 6) {
+		serial_buf_index = 0;
+		return;
+	} else if (serial_buffer[5] != 0x0d && serial_buf_index == 6) {
+		//serial_print("error : protocol mismatch\n"); 
+		serial_buf_index = 0;
+		return;
+	} else if (serial_buffer[5] == 0x0d && serial_buf_index == 6) {
+		//serial_print("ok\n"); 
+
+		if (serial_buffer[0] == 0x09) {
+			/*if (button_state)
+				serial_print("button pressed\n"); 
+			else
+				serial_print("button not pressed\n"); 
+			*/
+			send_char(button_state);
+		} else {
+			waveform[R] = waveform[G] = waveform[B] = serial_buffer[0];
+			maxcount[R] = maxcount[G] = maxcount[B] = ISR_PER_TENTH*serial_buffer[1];
+			maxcolor[R] = serial_buffer[2];
+			maxcolor[G] = serial_buffer[3];
+			maxcolor[B] = serial_buffer[4];
+		}
+
+		serial_buf_index = 0;
+	} else if (serial_buffer[serial_buf_index-1] == 0x0d && serial_buf_index != 6) {
+		serial_buf_index = 0;
+	}
+}
+
+#endif
 
 #ifdef I2C
 
@@ -664,8 +765,6 @@ get_temp(void)
 int
 main(void)
 {
-  waveform[R] = waveform[G] = waveform[B] = PULSEMODE_SINE;
-
   pins_init();
   pwm_init();
 
@@ -677,9 +776,13 @@ main(void)
    * concept of the device-ID would be out of sync.
    */
 
+#ifdef USB
   reset_usb();
   
   usbInit();
+#else
+	usart_init();
+#endif
 
 #ifdef I2C
   i2c_init();
@@ -694,8 +797,14 @@ main(void)
   duty[R] = duty[G] = duty[B] = 5;
   maxcolor[R] = maxcolor[G] = maxcolor[B] = 255;
 
+	serial_print("hello\n"); 
+
   while(1) {
+#ifdef USB
     usbPoll();
+#else
+		serial_poll();
+#endif
 
 #ifdef I2C
     get_temp();
