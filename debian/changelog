@@ -1,0 +1,24 @@
+museobutton (20091029-1) jaunty; urgency=low
+
+  * Update release. This version use an USB to serial converter (FT232R).
+
+ -- Erasme <support@erasme.org>  Thu, 29 Oct 2009 08:57:00 +0100
+
+museobutton (20080323-1) unstable; urgency=low
+
+  * Update release. This version revert to liblo.
+ -- Erasme <support@erasme.org>  Sun, 23 Mar 2008 22:32:00 +0100
+
+museobutton (20080313-1) unstable; urgency=low
+
+  * Update release. This version correct the frequency value (which was
+    infact de period value before).
+
+ -- Erasme <support@erasme.org>  Thu, 13 Mar 2008 17:54:00 +0100
+
+museobutton (20080312-1) unstable; urgency=low
+
+  * Initial release 
+
+ -- Erasme <support@erasme.org>  Wed, 12 Mar 2008 17:18:19 +0100
+

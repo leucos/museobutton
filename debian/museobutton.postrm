@@ -1,0 +1,5 @@
+#!/bin/bash
+
+if [ "$1" = "purge" ] ; then
+	update-rc.d museobutton remove >/dev/null || exit $?
+fi

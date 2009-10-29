@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if [ -x "/etc/init.d/museobutton" ]; then
+	if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
+		invoke-rc.d museobutton stop || exit 0
+	else
+		/etc/init.d/museobutton stop || exit 0
+	fi
+fi

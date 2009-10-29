@@ -1,0 +1,12 @@
+Source: museobutton
+Section: unknown
+Priority: extra
+Maintainer: Erasme <support@erasme.org>
+Build-Depends: debhelper (>= 5), avr-libc, binutils-avr, gcc-avr, doxygen, binutils, liblo0-dev, libusb-dev
+Standards-Version: 3.7.2
+
+Package: museobutton
+Architecture: any
+Depends: ${shlibs:Depends}, liblo0
+Description: Daemon to control the museobutton device
+ Daemon to control the museobutton device
