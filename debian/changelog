@@ -1,3 +1,10 @@
+museobutton (20091029-2) jaunty; urgency=low
+
+  * Correct cron.d to add full path else the daemon is not
+    checked each minute
+
+ -- Erasme <support@erasme.org>  Thu, 29 Oct 2009 14:51:00 +0100
+
 museobutton (20091029-1) jaunty; urgency=low
 
   * Update release. This version use an USB to serial converter (FT232R).
