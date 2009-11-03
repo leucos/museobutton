@@ -14,11 +14,11 @@
 
 CFLAGS = -Wall -g
 
-ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
-	CFLAGS += -O0
-else
-	CFLAGS += -O2
-endif
+#ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
+#	CFLAGS += -O0
+#else
+#	CFLAGS += -O2
+#endif
 
 configure: configure-stamp
 configure-stamp:
@@ -75,8 +75,8 @@ binary-arch: build install
 	dh_installman
 	dh_installcron
 	dh_link
-	dh_strip
-	dh_compress
+#	dh_strip
+#	dh_compress
 	dh_fixperms
 	dh_installdeb
 	dh_shlibdeps

@@ -1,3 +1,15 @@
+museobutton (20091103-1) jaunty; urgency=low
+
+  * Correct syslog bug in daemon
+
+ -- Erasme <support@erasme.org>  Tue, 03 Nov 2009 19:41:00 +0100
+
+museobutton (20091029-3) jaunty; urgency=low
+
+  * Remove -O2 optimisations, remove strip and compress
+
+ -- Erasme <support@erasme.org>  Tue, 03 Nov 2009 18:38:00 +0100
+
 museobutton (20091029-2) jaunty; urgency=low
 
   * Correct cron.d to add full path else the daemon is not
