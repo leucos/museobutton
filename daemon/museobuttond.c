@@ -132,7 +132,7 @@ debug(int level, const char * template, ...)
   va_start (ap, template);
 
   if (oDaemonize) {
-    //vsprintf (buffer, template, ap);
+    vsprintf (buffer, template, ap);
     syslog(level, "%s", buffer);
   } else {
     if (oDebug < level) return;
