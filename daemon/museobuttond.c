@@ -605,6 +605,8 @@ serialSetLed(const char *path, const char *types, lo_arg **argv, int argc,
 {
   debug(LOG_NOTICE,"got OSC message");
   
+	int i;
+
   uint8_t red   = argv[2]->i;
   uint8_t green = argv[3]->i;
   uint8_t blue  = argv[4]->i;
@@ -615,9 +617,9 @@ serialSetLed(const char *path, const char *types, lo_arg **argv, int argc,
 
   uint8_t period_in_tenths = (10/frequency);
 
-	char buf[7];
-
 	int *fd = (int*)user_data;
+
+	char buf[8];
 
   debug(LOG_NOTICE,"setting color #%.2x%.2x%.2x over %s with period of %d x 0.1 secs (%.2f Hz)",
         red,green,blue,wave,period_in_tenths, frequency);
@@ -626,31 +628,42 @@ serialSetLed(const char *path, const char *types, lo_arg **argv, int argc,
 
   /* sending waveform */
   if (!strcmp("sine", wave))
-		buf[1] = PULSEMODE_SIN;
+		buf[2] = PULSEMODE_SIN;
   else if (!strcmp("triangle",  wave))
-		buf[1] = PULSEMODE_TRIANGLE;
+		buf[2] = PULSEMODE_TRIANGLE;
 
 	debug(LOG_DEBUG, "sending period values");
-	buf[2] = period_in_tenths;
+	buf[3] = period_in_tenths;
 
 	debug(LOG_DEBUG, "sending rgb values");
 	
-	buf[3] = red;
-	buf[4] = green;
-	buf[5] = blue;
+	buf[4] = red;
+	buf[5] = green;
+	buf[6] = blue;
 
-	buf[0] = buf[6] = 0x0d;
+	buf[0] = buf[1] = buf[7] = 0x0d;
 
-	debug(LOG_DEBUG, "protocol string is %02X %02X %02X %02X %02X %02X %02X", 
+	for (i=3; i<6; i++) {
+		if (buf[i] == 0x0d) {
+			buf[i]++;
+		}
+	}
+
+	debug(LOG_DEBUG, "protocol string is %02X %02X %02X %02X %02X %02X %02X %02X", 
 				(unsigned char) buf[0],
 				(unsigned char) buf[1],
 				(unsigned char) buf[2],
 				(unsigned char) buf[3],
 				(unsigned char) buf[4],
 				(unsigned char) buf[5],
-				(unsigned char) buf[6]);
+				(unsigned char) buf[6],
+				(unsigned char) buf[7]);
 
+	// We write twice because we're scary 
 	write(*fd, &buf, sizeof(buf));
+	usleep(SERIAL_DELAY);
+	write(*fd, &buf, sizeof(buf));
+
   return TRUE;
 }
 
