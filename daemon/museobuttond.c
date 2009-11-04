@@ -275,7 +275,7 @@ int
 serialOpen(const char *port, int baudrate) {
   
 	int fd = open(port, O_RDWR | O_NOCTTY | O_NDELAY);
-	fcntl(fd, F_SETFL, FNDELAY);
+	//	fcntl(fd, F_SETFL, FNDELAY);
 
   debug(LOG_DEBUG,"Opening port %s...", port);
 
@@ -606,6 +606,7 @@ serialSetLed(const char *path, const char *types, lo_arg **argv, int argc,
   debug(LOG_NOTICE,"got OSC message");
   
 	int i;
+	int written;
 
   uint8_t red   = argv[2]->i;
   uint8_t green = argv[3]->i;
@@ -659,10 +660,33 @@ serialSetLed(const char *path, const char *types, lo_arg **argv, int argc,
 				(unsigned char) buf[6],
 				(unsigned char) buf[7]);
 
-	// We write twice because we're scary 
-	write(*fd, &buf, sizeof(buf));
-	usleep(SERIAL_DELAY);
-	write(*fd, &buf, sizeof(buf));
+	fcntl(*fd, F_SETFL, ~O_NONBLOCK);
+
+	/* OMG, I hope mom won't see this */
+	written = write(*fd,&buf,sizeof(buf));
+	usleep(200*1000);
+	written = write(*fd,&buf,sizeof(buf));
+	usleep(200*1000);
+	written = write(*fd,&buf,sizeof(buf));
+	usleep(200*1000);
+	written = write(*fd,&buf,sizeof(buf));
+	usleep(200*1000);
+	written = write(*fd,&buf,sizeof(buf));
+	usleep(200*1000);
+	written = write(*fd,&buf,sizeof(buf));
+
+	while (written != sizeof(buf)) {
+		if (written == -1) {
+			debug(LOG_CRIT, "Unable to write to fd");
+			exit(2);
+		}
+		debug(LOG_ERR, "Wrong number of bytes written retrying...");
+		usleep(200*1000);
+		written = write(*fd,&buf,sizeof(buf));
+	}
+
+	fcntl(*fd, F_SETFL, O_NONBLOCK);
+
 
   return TRUE;
 }
